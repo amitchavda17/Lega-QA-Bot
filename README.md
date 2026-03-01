@@ -119,7 +119,7 @@ So I run both and combine their scores: 70% vector, 30% BM25 (configurable via `
 
 ### Cross-encoder re-ranking
 
-The hybrid search (vector + BM25) gives us ~20 candidate chunks. They're roughly relevant, but the ranking is noisy — a chunk that mentions the right keywords might outrank one that actually answers the question. Re-ranking is a second pass that re-orders those candidates by how well each one actually matches the query, so the best chunks end up at the top where the LLM pays most attention.
+The hybrid search (vector + BM25) gives us ~20 candidate chunks. They're roughly relevant, but the ranking is noisy — a chunk that mentions the right keywords might outrank one that actually answers the question. Since I only keep the top 10, a relevant chunk sitting at position 15 because the bi-encoder scored it poorly gets cut entirely and never reaches the LLM. Re-ranking is a second pass that re-orders those 20 candidates by actual relevance to the query, so the 10 that survive the cutoff are the right ones.
 
 To understand why, it helps to know how the initial retrieval works. In vector search, the query and every chunk are each independently converted into a vector (a list of numbers), and you compare them by distance. This is called a **bi-encoder** — two separate encoding steps that never see each other. It's fast because you can pre-compute all the chunk vectors once at index time, but it's lossy. Each text gets compressed into a single point in space, so fine-grained relationships between words in the query and words in the chunk get lost.
 
