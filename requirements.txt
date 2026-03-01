@@ -1,0 +1,10 @@
+chromadb
+langchain-ollama
+langchain-core
+ollama
+rank-bm25
+sentence-transformers
+numpy
+ragas
+datasets
+pandas
