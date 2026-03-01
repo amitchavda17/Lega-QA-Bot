@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Legal Contract Q&A — Multi-Agent RAG System</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/white.css" />
+<style>
+  .reveal { font-size: 32px; }
+  .reveal h1 { font-size: 1.8em; color: #1a1a2e; }
+  .reveal h2 { font-size: 1.4em; color: #16213e; border-bottom: 3px solid #0f3460; padding-bottom: 10px; }
+  .reveal h3 { font-size: 1.1em; color: #0f3460; }
+  .reveal li { margin-bottom: 0.4em; font-size: 0.85em; }
+  .reveal table { font-size: 0.7em; margin: 0 auto; }
+  .reveal th { background: #0f3460; color: white; padding: 8px 16px; }
+  .reveal td { padding: 6px 16px; border-bottom: 1px solid #ddd; }
+  .reveal code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+  .reveal .highlight { color: #e94560; font-weight: bold; }
+  .reveal .metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; font-size: 0.8em; }
+  .reveal .metric-card { background: #f8f9fa; border-left: 4px solid #0f3460; padding: 12px 16px; text-align: left; border-radius: 4px; }
+  .reveal .metric-card .val { font-size: 1.6em; font-weight: bold; color: #0f3460; }
+  .reveal .metric-card .label { color: #666; font-size: 0.85em; }
+  .reveal .flow-box { background: #e8eaf6; border: 2px solid #0f3460; border-radius: 8px; padding: 10px 18px; margin: 6px auto; max-width: 520px; text-align: center; font-size: 0.8em; }
+  .reveal .flow-arrow { font-size: 1.2em; color: #0f3460; margin: 2px 0; }
+  .reveal .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; text-align: left; }
+  .reveal .two-col ul { margin: 0; padding-left: 1.2em; }
+  .title-slide h1 { font-size: 2em; margin-bottom: 0.2em; }
+  .title-slide p { color: #555; font-size: 0.9em; }
+  .reveal .small { font-size: 0.7em; color: #888; }
+</style>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+<!-- SLIDE 1: Title -->
+<section class="title-slide">
+  <h1>Legal Contract Q&A</h1>
+  <h3 style="color: #0f3460; font-weight: normal;">Multi-Agent RAG System for Legal Contract Analysis</h3>
+  <br/>
+  <p>Console-based interactive system &bull; Grounded answers with citations &bull; Risk detection</p>
+</section>
+
+<!-- SLIDE 2: Problem Statement -->
+<section>
+  <h2>1. Problem Statement</h2>
+  <p style="font-size:0.85em; text-align:left;">Build a system that lets users ask natural language questions about legal contracts and receive <span class="highlight">grounded, cited answers</span> with <span class="highlight">risk indicators</span>.</p>
+  <div class="two-col" style="margin-top: 20px;">
+    <div>
+      <h3>Requirements</h3>
+      <ul>
+        <li>Multi-turn conversational CLI</li>
+        <li>Answers backed by specific clauses</li>
+        <li>Legal/financial risk flagging</li>
+        <li>Cross-document conflict detection</li>
+        <li>Refuse out-of-scope requests</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Corpus</h3>
+      <ul>
+        <li>NDA (Acme ↔ Vendor XYZ)</li>
+        <li>Vendor Services Agreement</li>
+        <li>Service Level Agreement</li>
+        <li>Data Processing Agreement</li>
+      </ul>
+      <p class="small" style="margin-top:12px;">Topics: termination, confidentiality, liability, indemnification, governing law, data breach, compliance</p>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 3: Architecture Overview -->
+<section>
+  <h2>2. System Architecture</h2>
+  <table style="font-size:0.72em; width:100%; border-collapse:collapse; margin-top:10px;">
+    <thead>
+      <tr><th style="width:30px;">#</th><th style="width:220px;">Stage</th><th>What Happens</th></tr>
+    </thead>
+    <tbody>
+      <tr style="background:#e8f5e9;"><td>→</td><td><strong>User Query</strong></td><td>Question + conversation history (last 4 messages)</td></tr>
+      <tr><td>1</td><td><strong>Routing Agent</strong></td><td>Classifies intent (fact / risk / cross-doc / summary / greeting / OOS), selects target doc, generates BM25 query + HyDE hypothesis</td></tr>
+      <tr><td>2</td><td><strong>Hybrid Retrieval</strong></td><td>Vector search (Chroma) + BM25 keyword search → score fusion (70/30) → cross-encoder re-rank top 20 → return top 10</td></tr>
+      <tr><td>3</td><td><strong>Answer Agent</strong></td><td>Generates grounded answer using only retrieved excerpts; every fact must have a <code>[doc §section]</code> citation</td></tr>
+      <tr><td>4</td><td><strong>Grounding Verifier</strong></td><td>Breaks answer into claims, checks each against excerpts. If unsupported → retry retrieval with refined query (max 1 retry)</td></tr>
+      <tr><td>5</td><td><strong>Risk + Consistency</strong></td><td>Only for risk/cross-doc/summary intents: extract risks, detect cross-document conflicts</td></tr>
+      <tr style="background:#e3f2fd;"><td>←</td><td><strong>Output</strong></td><td>Answer &bull; Cited references &bull; Risk flags &bull; Contradictions</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- SLIDE 4: Ingestion Workflow -->
+<section>
+  <h2>2a. Ingestion Workflow</h2>
+  <div style="text-align:left; font-size:0.85em;">
+    <div class="flow-box" style="max-width:100%;">
+      <code>.txt files</code> → <strong>Section Parser</strong> → <strong>Parent Chunks</strong> → <strong>Child Chunks (≤400 chars)</strong> → <strong>Embed (nomic-embed-text)</strong> → <strong>ChromaDB</strong>
+    </div>
+    <br/>
+    <h3>Section-Aware Hierarchical Chunking</h3>
+    <ul>
+      <li>Parses document structure: numbered sections, <code>Section N</code>, <code>Article N</code>, ALL-CAPS headings</li>
+      <li><strong>Parent chunks</strong> = full sections (rich context for LLM)</li>
+      <li><strong>Child chunks</strong> = ≤400 char splits for precise retrieval</li>
+      <li>Sentence-aware splitting — never cuts mid-sentence</li>
+      <li>List-aware splitting — keeps (a), (b), (c) items together</li>
+      <li>100-char overlap between consecutive children</li>
+      <li>Min 20 chars (set low to keep short but critical clauses like "99.5% uptime")</li>
+    </ul>
+  </div>
+</section>
+
+<!-- SLIDE 5: Retrieval Deep Dive -->
+<section>
+  <h2>3. Retrieval Strategy</h2>
+  <div class="two-col" style="font-size:0.82em;">
+    <div>
+      <h3>Three-Stage Hybrid Retrieval</h3>
+      <ol>
+        <li><strong>Vector search</strong> (ChromaDB + nomic-embed-text)<br/>Semantic similarity</li>
+        <li><strong>BM25 keyword search</strong><br/>Exact term matches</li>
+        <li><strong>Score fusion</strong><br/>70% vector + 30% BM25</li>
+      </ol>
+      <h3 style="margin-top:16px;">+ Cross-Encoder Re-ranking</h3>
+      <ul>
+        <li>Top 20 candidates → ms-marco-MiniLM-L-6-v2</li>
+        <li>Joint (query, chunk) scoring → top 10</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Why Hybrid?</h3>
+      <ul>
+        <li>Vector alone misses exact terms<br/><span class="small">"Section 4.2" or "72 hours"</span></li>
+        <li>BM25 alone misses semantics<br/><span class="small">"termination notice" ≈ "cancellation period"</span></li>
+      </ul>
+      <h3 style="margin-top:16px;">HyDE (Hypothetical Document Embeddings)</h3>
+      <ul>
+        <li>Routing agent generates a hypothetical ideal clause</li>
+        <li>Used as vector query instead of raw question</li>
+        <li>Bridges question↔answer embedding gap</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 6: Agent Design -->
+<section>
+  <h2>3. Agent Design & Prompts</h2>
+  <table>
+    <thead>
+      <tr><th>Agent</th><th>Role</th><th>Key Design Choice</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Routing</strong></td>
+        <td>Intent classification, doc scoping, query refinement</td>
+        <td>Generates both BM25 query + HyDE hypothesis; explicit doc-name mapping rules</td>
+      </tr>
+      <tr>
+        <td><strong>Answer</strong></td>
+        <td>Grounded answer with mandatory citations</td>
+        <td>"Every sentence with a fact must have a citation" — strict enforcement</td>
+      </tr>
+      <tr>
+        <td><strong>Grounding</strong></td>
+        <td>Claim-level verification (CRAG)</td>
+        <td>Max 1 retry — diminishing returns beyond that</td>
+      </tr>
+      <tr>
+        <td><strong>Risk</strong></td>
+        <td>Legal/financial risk extraction</td>
+        <td>Only runs for risk/cross-doc/summary intents — prevents spurious flags</td>
+      </tr>
+      <tr>
+        <td><strong>Consistency</strong></td>
+        <td>Cross-document conflict detection</td>
+        <td>Only flags true conflicts; silence ≠ conflict</td>
+      </tr>
+    </tbody>
+  </table>
+  <p style="font-size:0.75em; margin-top:16px;">All prompts centralized in <code>utils/prompts.py</code> &bull; All LLM calls via single <code>OllamaChat</code> client &bull; Temperature 0 + seed 42 for determinism</p>
+</section>
+
+<!-- SLIDE 7: Key Design Decisions -->
+<section>
+  <h2>3. Design Decisions Summary</h2>
+  <table>
+    <thead>
+      <tr><th>Decision</th><th>Choice</th><th>Rationale</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Chunking</td><td>Section-aware hierarchical</td><td>Preserves legal clause boundaries; child retrieval + parent context</td></tr>
+      <tr><td>Embedding</td><td>nomic-embed-text (Ollama)</td><td>Fully offline, no API keys, good on legal text</td></tr>
+      <tr><td>LLM</td><td>llama3.1 (Ollama)</td><td>Strong instruction following, JSON output, local</td></tr>
+      <tr><td>Vector DB</td><td>ChromaDB (persistent)</td><td>Simple, file-based, offline index build</td></tr>
+      <tr><td>Retrieval</td><td>Hybrid + cross-encoder</td><td>Covers both semantic and keyword; re-ranking improves precision</td></tr>
+      <tr><td>Self-correction</td><td>CRAG with 1 retry</td><td>Catches hallucinations without over-engineering</td></tr>
+      <tr><td>Risk gating</td><td>Intent-based activation</td><td>Eliminated false positives on factual queries (+18% risk accuracy)</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- SLIDE 8: Evaluation Approach -->
+<section>
+  <h2>4. Evaluation Approach</h2>
+  <div class="two-col" style="font-size:0.8em;">
+    <div>
+      <h3>Custom Metrics (Fast, Deterministic)</h3>
+      <table>
+        <tr><td><strong>Key Phrase Recall</strong></td><td>Expected facts in answer?</td></tr>
+        <tr><td><strong>Citation Present</strong></td><td>Sources cited?</td></tr>
+        <tr><td><strong>Retrieval Hit Rate</strong></td><td>Right docs retrieved?</td></tr>
+        <tr><td><strong>Risk Correct</strong></td><td>Risks flagged appropriately?</td></tr>
+        <tr><td><strong>Scope Correct</strong></td><td>OOS queries refused?</td></tr>
+      </table>
+    </div>
+    <div>
+      <h3>Ragas (LLM-as-Judge)</h3>
+      <table>
+        <tr><td><strong>Faithfulness</strong></td><td>Claims supported by context?</td></tr>
+        <tr><td><strong>Answer Relevancy</strong></td><td>Answer matches question?</td></tr>
+        <tr><td><strong>Context Precision</strong></td><td>Best chunks ranked highest?</td></tr>
+      </table>
+      <br/>
+      <p class="small">Ragas uses llama3.1 as judge — faithfulness scores less reliable than with GPT-4 due to chained LLM calls timing out.</p>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 9: Evaluation Results -->
+<section>
+  <h2>4. Evaluation Results</h2>
+  <p style="font-size:0.8em;">17 sample queries — fact extraction, risk identification, cross-document, summarization, out-of-scope</p>
+  <div class="metric-grid" style="margin-top:20px;">
+    <div class="metric-card">
+      <div class="val">98%</div>
+      <div class="label">Retrieval Hit Rate</div>
+    </div>
+    <div class="metric-card">
+      <div class="val">0.86</div>
+      <div class="label">Answer Relevancy (Ragas)</div>
+    </div>
+    <div class="metric-card">
+      <div class="val">94%</div>
+      <div class="label">Scope Handling</div>
+    </div>
+    <div class="metric-card">
+      <div class="val">0.78</div>
+      <div class="label">Context Precision (Ragas)</div>
+    </div>
+    <div class="metric-card">
+      <div class="val">80%</div>
+      <div class="label">Citation Present</div>
+    </div>
+    <div class="metric-card">
+      <div class="val">76%</div>
+      <div class="label">Risk Detection Accuracy</div>
+    </div>
+    <div class="metric-card">
+      <div class="val">71%</div>
+      <div class="label">Key Phrase Recall</div>
+    </div>
+    <div class="metric-card">
+      <div class="val">0.47*</div>
+      <div class="label">Faithfulness (Ragas) — *local LLM limitation</div>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 10: Evaluation Limitations -->
+<section>
+  <h2>4. Evaluation — Limitations</h2>
+  <ul style="font-size:0.85em;">
+    <li><strong>Small query set</strong> — 17 queries cover key scenarios but not edge cases</li>
+    <li><strong>No expert annotation</strong> — ground truths crafted by developer, not legal professionals</li>
+    <li><strong>Local LLM judge</strong> — Ragas faithfulness unreliable with llama3.1 (timeouts, inconsistent decompositions); would improve significantly with GPT-4</li>
+    <li><strong>Single-turn eval only</strong> — multi-turn conversation quality is not measured</li>
+    <li><strong>No adversarial testing</strong> — prompt injection / jailbreak not evaluated</li>
+  </ul>
+  <p style="font-size:0.8em; margin-top: 20px;">Custom deterministic metrics provide <strong>reproducible, fast</strong> regression checks — complement LLM-as-judge for complete coverage.</p>
+</section>
+
+<!-- SLIDE 11: Known Pitfalls -->
+<section>
+  <h2>5. Known Pitfalls</h2>
+  <table style="font-size:0.68em; width:100%;">
+    <thead>
+      <tr><th style="width:200px;">Pitfall</th><th>Impact</th><th>Mitigation / Status</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Regex-based chunking</strong></td><td>Non-standard doc formatting → broken sections</td><td>Works well for structured contracts; would need layout-aware parsing for PDFs</td></tr>
+      <tr><td><strong>Grounding verifier is an LLM</strong></td><td>Can mark hallucinated claims as "supported"</td><td>CRAG catches most cases; no substitute for human review on critical queries</td></tr>
+      <tr><td><strong>No confidence signal</strong></td><td>User can't tell certain answers from guesses</td><td>Could combine retrieval distance + grounding verdict into a score</td></tr>
+      <tr><td><strong>Fragile JSON parsing</strong></td><td>LLM occasionally breaks JSON format</td><td>Fallback parser with regex extraction; 95%+ success rate with llama3.1</td></tr>
+      <tr><td><strong>Sequential 5-agent calls</strong></td><td>30-60s latency per query on CPU</td><td>Risk + consistency are independent → parallelizable for ~35% latency cut</td></tr>
+      <tr><td><strong>BM25 rebuilt every startup</strong></td><td>Slow startup with large corpus</td><td>Only vector index is persisted; BM25 persistence would be a quick win</td></tr>
+      <tr><td><strong>No prompt injection guard</strong></td><td>Adversarial queries could manipulate answers</td><td>Add lightweight classifier before routing agent</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- SLIDE 12: Production Roadmap -->
+<section>
+  <h2>5. If This Were Production</h2>
+  <div class="two-col" style="font-size:0.76em;">
+    <div>
+      <h3>P0 — Must Have</h3>
+      <ul>
+        <li><strong>PDF/DOCX ingestion</strong> — layout-aware parsing; real legal docs are never plain text</li>
+        <li><strong>Incremental indexing</strong> — re-embed only changed docs, not full rebuild</li>
+        <li><strong>Confidence scores</strong> — combine retrieval distance + grounding result → user-facing indicator</li>
+        <li><strong>Streaming</strong> — stream answer tokens while risk analysis runs in background</li>
+      </ul>
+    </div>
+    <div>
+      <h3>P1 — High Value</h3>
+      <ul>
+        <li><strong>Observability</strong> — trace every agent call: input/output, tokens, latency, retrieval scores</li>
+        <li><strong>Document versioning</strong> — audit trail: which contract version generated this answer?</li>
+        <li><strong>Domain-adapted embeddings</strong> — fine-tune on legal text ("material breach" ≈ "significant violation")</li>
+        <li><strong>User feedback loop</strong> — thumbs up/down → retrieval tuning + prompt refinement</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 12: Thank You -->
+<section class="title-slide">
+  <h1>Thank You</h1>
+  <br/>
+  <p style="font-size:0.9em;">
+    <strong>Tech Stack:</strong> llama3.1 &bull; nomic-embed-text &bull; ChromaDB &bull; BM25 &bull; Cross-encoder &bull; Ollama
+  </p>
+  <p style="font-size:0.85em; color:#666; margin-top:20px;">
+    5 agents &bull; Hybrid retrieval &bull; CRAG self-correction &bull; 17-query evaluation suite
+  </p>
+</section>
+
+</div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script>
+Reveal.initialize({
+  hash: true,
+  slideNumber: true,
+  transition: 'slide',
+  width: 1100,
+  height: 700,
+});
+</script>
+</body>
+</html>

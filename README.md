@@ -13,6 +13,7 @@ A console-based multi-agent RAG system for querying and analyzing legal contract
 5. [How to Run](#5-how-to-run)
 6. [Evaluation](#6-evaluation)
 7. [Known Limitations](#7-known-limitations)
+8. [Production Roadmap](#8-production-roadmap)
 
 ---
 
@@ -393,10 +394,58 @@ Evaluated on 17 sample queries covering fact extraction, risk identification, cr
 
 ## 7. Known Limitations
 
-- **Corpus size** — Tested with 4 contracts. Scaling to hundreds of documents would require chunking/indexing optimizations and potentially a dedicated vector database
-- **Text files only** — The loader reads `.txt` files; PDF, DOCX, or scanned documents are not supported
-- **Local LLM constraints** — llama3.1 occasionally produces imperfect JSON or misses citation formatting, especially for complex multi-document questions
-- **No prompt injection protection** — The system assumes well-intentioned queries; adversarial prompt injection is not mitigated
-- **No authentication or access control** — All documents are accessible to any user of the console
-- **Single-threaded** — Agent calls are sequential; parallelizing independent agents (e.g., risk + consistency) could reduce latency
-- **Conversation context window** — Only the last 4 messages are passed to agents, which may lose important context in long conversations
+### Retrieval & Accuracy
+
+- **Chunking is regex-based** — Section parsing relies on patterns like `N. Title` and `Section N`. Contracts with non-standard formatting (e.g., tables, nested appendices, inline headers) may chunk poorly, leading to missed or malformed sections.
+- **No confidence signal** — The system returns answers without any confidence score. A user cannot tell whether the system is highly certain or guessing from loosely related chunks. The grounding verifier helps internally, but its verdict is not surfaced.
+- **Grounding verifier is itself an LLM** — CRAG relies on llama3.1 to judge its own output. If the LLM hallucinates during verification (marking a fabricated claim as "supported"), the self-correction loop fails silently.
+- **BM25 index rebuilt on every startup** — The keyword index is constructed in-memory from chunks each time `main.py` runs. With a large corpus this adds noticeable startup latency. Only the vector index (Chroma) is persisted.
+
+### LLM & Prompting
+
+- **JSON output is fragile** — The LLM is prompted to return JSON, but llama3.1 occasionally wraps it in markdown fences or adds trailing text. The parser uses `find("{")` / `rfind("}")` extraction which handles most cases, but deeply nested or malformed JSON can still fail.
+- **Citation consistency varies** — Despite strict prompt instructions, the LLM sometimes omits citations on 1-2 sentences or uses slightly different formatting. The 80% citation rate reflects this — it's a prompt compliance issue inherent to the model size.
+- **Single model for all roles** — Using llama3.1 for routing, answering, grounding, risk, and consistency means each agent is limited by the same model's capabilities. A production system could use a smaller/faster model for routing and a stronger model for answering.
+
+### System Design
+
+- **Sequential agent calls** — Each query makes up to 5 LLM calls in series (routing → answering → grounding → retry → risk/consistency). With llama3.1 on CPU, total latency per query can reach 30-60 seconds. Risk and consistency agents are independent and could run in parallel.
+- **No incremental indexing** — Adding or updating a single document requires a full rebuild (`build_index.py` drops and recreates the entire Chroma collection). There is no diffing or selective re-embedding.
+- **Text files only** — The loader reads `.txt` files. PDF, DOCX, and scanned documents are not supported. Real legal corpora are predominantly PDF.
+- **Conversation context is naive** — The last 4 messages are passed as raw text to agents. There is no summarization of older turns, so context from earlier in a long conversation is lost entirely.
+- **No query guardrails** — The system does not detect prompt injection, jailbreaking, or PII in user queries. It assumes all queries are well-intentioned and contract-related.
+- **No access control** — All documents are visible to all users. In a real legal setting, different users/teams would need scoped access to specific contracts.
+
+---
+
+## 8. Production Roadmap
+
+If this system were deployed for real legal teams, here is what I would prioritize:
+
+### P0 — Must Have
+
+| Enhancement | Why |
+|------------|-----|
+| **Document format support** (PDF with layout parsing, DOCX) | Real legal corpora are never plain text. Layout-aware parsing (e.g., unstructured.io, PyMuPDF) preserves tables, headers, and page structure that regex-based chunking currently misses. |
+| **Incremental indexing** | Detect changed/new documents, re-embed only affected chunks. Legal teams update contracts frequently — full rebuilds are not acceptable. |
+| **Confidence scoring** | Combine retrieval distance, grounding result, and citation density into a user-facing confidence indicator. Lets users know when to trust the answer vs. verify manually. |
+| **Prompt injection detection** | Add a lightweight classifier before the routing agent to flag adversarial inputs. Legal systems handle sensitive data — injection attacks could extract or fabricate clause interpretations. |
+
+### P1 — High Value
+
+| Enhancement | Why |
+|------------|-----|
+| **Parallel agent execution** | Risk and consistency agents are independent of each other — run them concurrently to cut 30-40% of latency on risk/cross-doc queries. |
+| **Streaming responses** | Stream answer tokens to the user while risk/consistency analysis runs in the background. Reduces perceived latency from 30s+ to first-token-in-3s. |
+| **Observability & tracing** | Log every agent call with input/output, token count, latency, and retrieval scores. Essential for debugging production failures and identifying prompt regressions. |
+| **Document versioning** | Track which version of a contract was used to generate each answer. Legal teams need audit trails — "this answer was based on the NDA signed 2024-01-15, not the amended version." |
+
+### P2 — Long Term
+
+| Enhancement | Why |
+|------------|-----|
+| **Domain-adapted embeddings** | Fine-tune the embedding model on legal text. General-purpose embeddings treat "material breach" and "significant violation" as loosely related; a legal-tuned model would rank them much closer. |
+| **Human-annotated evaluation set** | Replace developer-crafted ground truths with answers validated by legal professionals. Current evaluation measures system behavior, not legal correctness. |
+| **User feedback loop** | Thumbs up/down on answers → feed into retrieval tuning and prompt refinement. Closes the loop between deployment and improvement. |
+| **Multi-tenant access control** | Per-user or per-team document visibility. Different departments should only see contracts relevant to them. |
+| **Prompt version control** | Track prompt changes alongside eval metrics. When a prompt edit improves citation rate but degrades risk detection, you need the data to make the tradeoff. |
