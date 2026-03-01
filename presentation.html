@@ -81,7 +81,7 @@
       <tr style="background:#e8f5e9;"><td>→</td><td><strong>User Query</strong></td><td>Question + conversation history (last 4 messages)</td></tr>
       <tr><td>1</td><td><strong>Routing Agent</strong></td><td>Classifies intent (fact / risk / cross-doc / summary / greeting / OOS), selects target doc, generates BM25 query + HyDE hypothesis</td></tr>
       <tr><td>2</td><td><strong>Hybrid Retrieval</strong></td><td>Vector search (Chroma) + BM25 keyword search → score fusion (70/30) → cross-encoder re-rank top 20 → return top 10</td></tr>
-      <tr><td>3</td><td><strong>Answer Agent</strong></td><td>Generates grounded answer using only retrieved excerpts; every fact must have a <code>[doc §section]</code> citation</td></tr>
+      <tr><td>3</td><td><strong>Answer Agent</strong></td><td>Generates grounded answer using only retrieved excerpts; every fact must have a <code>[doc:section]</code> citation</td></tr>
       <tr><td>4</td><td><strong>Grounding Verifier</strong></td><td>Breaks answer into claims, checks each against excerpts. If unsupported → retry retrieval with refined query (max 1 retry)</td></tr>
       <tr><td>5</td><td><strong>Risk + Consistency</strong></td><td>Only for risk/cross-doc/summary intents: extract risks, detect cross-document conflicts</td></tr>
       <tr style="background:#e3f2fd;"><td>←</td><td><strong>Output</strong></td><td>Answer &bull; Cited references &bull; Risk flags &bull; Contradictions</td></tr>

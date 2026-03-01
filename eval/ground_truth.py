@@ -4,7 +4,7 @@ SAMPLE_QUERIES = [
     {
         "id": 1,
         "query": "What is the notice period for terminating the NDA?",
-        "reference": "Either party may terminate with thirty (30) days written notice (NDA §3).",
+        "reference": "Either party may terminate with thirty (30) days written notice (NDA:3).",
         "expected_docs": ["nda_acme_vendor"],
         "expected_intent": "fact",
         "key_phrases": ["30 days", "thirty", "written notice"],
@@ -13,7 +13,7 @@ SAMPLE_QUERIES = [
     {
         "id": 2,
         "query": "What is the uptime commitment in the SLA?",
-        "reference": "Vendor shall ensure 99.5% monthly uptime (SLA §1).",
+        "reference": "Vendor shall ensure 99.5% monthly uptime (SLA:1).",
         "expected_docs": ["service_level_agreement"],
         "expected_intent": "fact",
         "key_phrases": ["99.5%", "monthly uptime"],
@@ -22,7 +22,7 @@ SAMPLE_QUERIES = [
     {
         "id": 3,
         "query": "Which law governs the Vendor Services Agreement?",
-        "reference": "The Vendor Services Agreement is governed by the laws of England and Wales (§6).",
+        "reference": "The Vendor Services Agreement is governed by the laws of England and Wales (:6).",
         "expected_docs": ["vendor_services_agreement"],
         "expected_intent": "fact",
         "key_phrases": ["England and Wales"],
@@ -31,7 +31,7 @@ SAMPLE_QUERIES = [
     {
         "id": 4,
         "query": "Do confidentiality obligations survive termination of the NDA?",
-        "reference": "Yes, confidentiality obligations survive termination for five (5) years (NDA §3).",
+        "reference": "Yes, confidentiality obligations survive termination for five (5) years (NDA:3).",
         "expected_docs": ["nda_acme_vendor"],
         "expected_intent": "fact",
         "key_phrases": ["five", "5 years", "survive"],
@@ -41,8 +41,8 @@ SAMPLE_QUERIES = [
         "id": 5,
         "query": "Is liability capped for breach of confidentiality?",
         "reference": (
-            "The NDA (§4) specifies no explicit limitation of liability. "
-            "The Vendor Services Agreement (§4) caps total liability at fees paid in the preceding 12 months, "
+            "The NDA (:4) specifies no explicit limitation of liability. "
+            "The Vendor Services Agreement (:4) caps total liability at fees paid in the preceding 12 months, "
             "except for indemnification and gross negligence."
         ),
         "expected_docs": ["nda_acme_vendor", "vendor_services_agreement"],
@@ -55,7 +55,7 @@ SAMPLE_QUERIES = [
         "query": "What remedies are available if the SLA uptime is not met?",
         "reference": (
             "Vendor shall provide service credits as defined in Schedule B. "
-            "Service credits are the sole and exclusive remedy (SLA §2)."
+            "Service credits are the sole and exclusive remedy (SLA:2)."
         ),
         "expected_docs": ["service_level_agreement"],
         "expected_intent": "fact",
@@ -66,8 +66,8 @@ SAMPLE_QUERIES = [
         "id": 7,
         "query": "Is Vendor XYZ's liability capped for data breaches?",
         "reference": (
-            "The DPA (§5) does not specify an independent liability cap and relies on the Vendor Services Agreement. "
-            "The VSA (§4) caps total liability at fees paid in the preceding 12 months, "
+            "The DPA (:5) does not specify an independent liability cap and relies on the Vendor Services Agreement. "
+            "The VSA (:4) caps total liability at fees paid in the preceding 12 months, "
             "except for indemnification and gross negligence."
         ),
         "expected_docs": ["data_processing_agreement", "vendor_services_agreement"],
@@ -79,7 +79,7 @@ SAMPLE_QUERIES = [
         "id": 8,
         "query": "Which agreement governs data breach notification timelines?",
         "reference": (
-            "The Data Processing Agreement (§3) requires notification within 72 hours of becoming aware of a breach."
+            "The Data Processing Agreement (:3) requires notification within 72 hours of becoming aware of a breach."
         ),
         "expected_docs": ["data_processing_agreement"],
         "expected_intent": "fact",
@@ -90,9 +90,9 @@ SAMPLE_QUERIES = [
         "id": 9,
         "query": "Are there conflicting governing laws across agreements?",
         "reference": (
-            "Yes. The NDA is governed by California law (§5), "
-            "the Vendor Services Agreement by England and Wales (§6), "
-            "and the DPA by EU/GDPR law (§6)."
+            "Yes. The NDA is governed by California law (:5), "
+            "the Vendor Services Agreement by England and Wales (:6), "
+            "and the DPA by EU/GDPR law (:6)."
         ),
         "expected_docs": ["nda_acme_vendor", "vendor_services_agreement", "data_processing_agreement"],
         "expected_intent": "cross_document",
@@ -103,9 +103,9 @@ SAMPLE_QUERIES = [
         "id": 10,
         "query": "Are there any legal risks related to liability exposure?",
         "reference": (
-            "The NDA has no explicit liability cap (§4). "
-            "The SLA limits remedies to service credits only (§2). "
-            "The SLA excludes indirect and consequential damages (§4)."
+            "The NDA has no explicit liability cap (:4). "
+            "The SLA limits remedies to service credits only (:2). "
+            "The SLA excludes indirect and consequential damages (:4)."
         ),
         "expected_docs": ["nda_acme_vendor", "service_level_agreement", "vendor_services_agreement"],
         "expected_intent": "risk",
@@ -116,9 +116,9 @@ SAMPLE_QUERIES = [
         "id": 11,
         "query": "Identify any clauses that could pose financial risk to Acme Corp.",
         "reference": (
-            "Financial risks include: fixed monthly fees with late payment interest (VSA §2), "
-            "sole remedy of service credits for downtime (SLA §2), "
-            "and no liability cap in the NDA (§4)."
+            "Financial risks include: fixed monthly fees with late payment interest (VSA:2), "
+            "sole remedy of service credits for downtime (SLA:2), "
+            "and no liability cap in the NDA (:4)."
         ),
         "expected_docs": ["vendor_services_agreement", "service_level_agreement", "nda_acme_vendor"],
         "expected_intent": "risk",
@@ -129,7 +129,7 @@ SAMPLE_QUERIES = [
         "id": 12,
         "query": "Is there any unlimited liability in these agreements?",
         "reference": (
-            "The NDA (§4) states the Receiving Party is liable for damages with no explicit limitation of liability."
+            "The NDA (:4) states the Receiving Party is liable for damages with no explicit limitation of liability."
         ),
         "expected_docs": ["nda_acme_vendor"],
         "expected_intent": "risk",
@@ -140,7 +140,7 @@ SAMPLE_QUERIES = [
         "id": 13,
         "query": "Can Vendor XYZ share Acme's confidential data with subcontractors?",
         "reference": (
-            "The DPA (§4) allows the Processor to engage subprocessors with prior written authorization from the Controller."
+            "The DPA (:4) allows the Processor to engage subprocessors with prior written authorization from the Controller."
         ),
         "expected_docs": ["data_processing_agreement"],
         "expected_intent": "fact",
@@ -151,8 +151,8 @@ SAMPLE_QUERIES = [
         "id": 14,
         "query": "What happens if Vendor delays breach notification beyond 72 hours?",
         "reference": (
-            "Notification must occur within 72 hours (DPA §3). "
-            "A delay would breach the DPA obligation and may violate GDPR requirements (DPA §6)."
+            "Notification must occur within 72 hours (DPA:3). "
+            "A delay would breach the DPA obligation and may violate GDPR requirements (DPA:6)."
         ),
         "expected_docs": ["data_processing_agreement"],
         "expected_intent": "risk",

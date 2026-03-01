@@ -14,7 +14,7 @@ def _cache_key(query: str, last_assistant: str) -> str:
 def _format_refs(refs: List[Dict]) -> str:
     if not refs:
         return ""
-    lines = [f"  [{r.get('doc_id', '')} §{r.get('section_path', '')}]: {r.get('section_title', '')}" for r in refs]
+    lines = [f"  [{r.get('doc_id', '')}:{r.get('section_path', '')}]: {r.get('section_title', '')}" for r in refs]
     return "References:\n" + "\n".join(lines)
 
 

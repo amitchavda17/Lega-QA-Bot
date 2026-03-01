@@ -20,7 +20,7 @@ def assess_grounding(
         doc_id = meta.get("doc_id", "")
         sec = meta.get("section_path", "")
         text = c.get("text", "")
-        excerpts.append(f"[{idx}] {doc_id} §{sec}\n{text}")
+        excerpts.append(f"[{idx}] {doc_id}:{sec}\n{text}")
     ctx = "\n\n".join(excerpts)
 
     user_content = (

@@ -24,8 +24,8 @@ def key_phrase_recall(answer: str, key_phrases: List[str]) -> float:
 
 
 def citation_present(answer: str) -> bool:
-    """True if the answer contains at least one citation pattern like [doc_id §section]."""
-    return bool(re.search(r"\[.+?§.+?\]", answer))
+    """True if the answer contains at least one citation pattern like [doc_id:section]."""
+    return bool(re.search(r"\[.+?:.+?\]", answer))
 
 
 def retrieval_hit_rate(retrieved_doc_ids: List[str], expected_doc_ids: List[str]) -> float:

@@ -40,7 +40,7 @@ User Query + Conversation History
           |
           v
   3. Answer Agent
-     grounded answer with [doc §section] citations
+     grounded answer with [doc:section] citations
           |
           v
   4. Grounding Verifier (CRAG)
@@ -117,9 +117,15 @@ So I run both and combine their scores: 70% vector, 30% BM25 (configurable via `
 
 ### Cross-encoder re-ranking
 
-The bi-encoder embeddings used in vector search are fast (the whole corpus is pre-embedded) but approximate — each text gets compressed into a single vector, and you compare with cosine distance. A cross-encoder is much more accurate because it processes the query and chunk together in a single forward pass, with full attention between them. But it's too slow to run on every chunk.
+The hybrid search (vector + BM25) gives us ~20 candidate chunks. They're roughly relevant, but the ranking is noisy — a chunk that mentions the right keywords might outrank one that actually answers the question. Re-ranking is a second pass that re-orders those candidates by how well each one actually matches the query, so the best chunks end up at the top where the LLM pays most attention.
 
-The compromise: use bi-encoder + BM25 to get 20 candidates, then re-rank those 20 with a cross-encoder (`ms-marco-MiniLM-L-6-v2`). Top 10 go to the LLM. You get cross-encoder quality without cross-encoder cost.
+To understand why, it helps to know how the initial retrieval works. In vector search, the query and every chunk are each independently converted into a vector (a list of numbers), and you compare them by distance. This is called a **bi-encoder** — two separate encoding steps that never see each other. It's fast because you can pre-compute all the chunk vectors once at index time, but it's lossy. Each text gets compressed into a single point in space, so fine-grained relationships between words in the query and words in the chunk get lost.
+
+A **cross-encoder** works differently. Instead of encoding the query and chunk separately, it feeds them both into the model together as a single input: `[query] + [chunk]`. The model sees every word from both sides at once, so it can do things like notice that "notice period" in the query lines up with "30 days written notice" in the chunk, even if those phrases would land in different parts of embedding space when encoded independently. The output is a single relevance score rather than two separate vectors.
+
+The trade-off is speed. A bi-encoder encodes each chunk once during indexing — at query time you only encode the query and do fast vector math. A cross-encoder has to do a full model forward pass for every (query, chunk) pair. With 200+ chunks that's 200+ inference calls per query, which is way too slow. But running it on just 20 pre-filtered candidates is cheap and gives much better final ranking.
+
+I use `ms-marco-MiniLM-L-6-v2` — it's a small (22M parameter) model trained specifically for passage re-ranking on the MS MARCO dataset, which is a large collection of real search queries and web passages. It's the standard choice for this kind of setup because it's fast enough to run on CPU in real-time and still gives a meaningful quality bump over bi-encoder scores alone. Larger re-rankers exist but don't justify the latency here.
 
 ### HyDE (Hypothetical Document Embeddings)
 
@@ -202,24 +208,24 @@ Query: What is the notice period for terminating the NDA?
 
 --- Answer ---
 Either party may terminate the NDA by providing 30 days' written notice
-to the other party [nda_acme_vendor §7].
+to the other party [nda_acme_vendor:7].
 
 References:
-  [nda_acme_vendor §7]: Termination
+  [nda_acme_vendor:7]: Termination
 
 Query: Are there any conflicting governing laws across agreements?
 
 --- Answer ---
 Yes. The NDA is governed by the laws of the State of California
-[nda_acme_vendor §10], while the Vendor Services Agreement is governed
-by the laws of the State of New York [vendor_services_agreement §12].
+[nda_acme_vendor:10], while the Vendor Services Agreement is governed
+by the laws of the State of New York [vendor_services_agreement:12].
 
 References:
-  [nda_acme_vendor §10]: Governing Law
-  [vendor_services_agreement §12]: Governing Law
+  [nda_acme_vendor:10]: Governing Law
+  [vendor_services_agreement:12]: Governing Law
 
 Risks:
-  ⚠ Conflicting governing laws (nda_acme_vendor §10 vs vendor_services_agreement §12)
+  ⚠ Conflicting governing laws (nda_acme_vendor:10 vs vendor_services_agreement:12)
 
 Inconsistencies:
   [Governing Law] nda_acme_vendor vs vendor_services_agreement:
@@ -237,7 +243,7 @@ These are cheap, reproducible, and run in a few minutes. Each one targets a spec
 
 - **key_phrase_recall** — what fraction of expected key phrases appear in the answer? This catches the case where the system returns a vaguely relevant response but misses the actual facts (e.g., says "there is a notice period" but doesn't mention "30 days").
 
-- **citation_present** — does the answer contain at least one `[doc §section]` citation? A RAG system that doesn't cite its sources is just a chatbot. This is a binary check: either the answer points back to a document or it doesn't.
+- **citation_present** — does the answer contain at least one `[doc:section]` citation? A RAG system that doesn't cite its sources is just a chatbot. This is a binary check: either the answer points back to a document or it doesn't.
 
 - **retrieval_hit_rate** — what fraction of the expected source documents showed up in retrieval results? If this is low, the problem is in retrieval (chunking, embeddings, search), not generation. If this is high but answers are still wrong, the problem is in the LLM's use of context. This metric tells you where to look.
 

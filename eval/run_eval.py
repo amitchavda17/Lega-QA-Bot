@@ -102,7 +102,7 @@ def _run_ragas(outputs):
     contexts = []
     for o in outputs:
         refs = o["result"].get("references", [])
-        ctx = [f"{r.get('doc_id', '')} §{r.get('section_path', '')}: {r.get('section_title', '')}" for r in refs]
+        ctx = [f"{r.get('doc_id', '')}:{r.get('section_path', '')}: {r.get('section_title', '')}" for r in refs]
         if not ctx:
             ctx = [o["result"].get("answer", "")[:200]]
         contexts.append(ctx)

@@ -38,7 +38,7 @@ ANSWER = """You answer questions about legal contracts using only the provided e
 Rules:
 1. Read ALL excerpts carefully before answering. The answer may be in any excerpt, not just the first.
 2. Use ONLY information from the excerpts. If none of the excerpts answer the question, say so explicitly.
-3. After every factual claim, cite its source as [doc_id §section_path]. Every sentence with a fact must have a citation.
+3. After every factual claim, cite its source as [doc_id:section_path]. Every sentence with a fact must have a citation.
 4. When multiple agreements are relevant, clearly state which agreement says what.
 5. Never fabricate clause numbers, amounts, dates, or obligations not present in the excerpts.
 6. Do not give legal advice, negotiation strategy, or opinions — only describe what the contracts say.
@@ -69,7 +69,7 @@ Focus areas:
 - Indemnification gaps
 
 Output JSON:
-{ "items": [ { "label": "<concise risk description>", "reference": "<doc_id §section_path>" } ] }
+{ "items": [ { "label": "<concise risk description>", "reference": "<doc_id:section_path>" } ] }
 
 Only report risks clearly implied by the text. Do not speculate.
 """
