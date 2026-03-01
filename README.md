@@ -103,31 +103,27 @@ Legal-QA-Bot/
 
 Most RAG systems chunk documents with a fixed sliding window — take 500 characters, step forward 250, repeat. That works okay for unstructured text, but contracts aren't unstructured. They have numbered sections, sub-clauses, enumerated obligations. A sliding window doesn't care about any of that — it'll happily cut a clause in half or lump two unrelated sections into one chunk.
 
-So instead of a sliding window, I detect section boundaries with regex (`1. Title`, `Section N`, `Article N`) and split along those. Each section becomes a "parent" — the full text of that clause. Then each parent gets broken into smaller "children" (≤400 chars) that respect sentence boundaries and keep enumerated lists like (a), (b), (c) together.
+So instead of a sliding window, we detect section boundaries with regex (`1. Title`, `Section N`, `Article N`) and split along those. Each section becomes a "parent" — the full text of that clause. Then each parent gets broken into smaller "children" (≤400 chars) that respect sentence boundaries and keep enumerated lists like (a), (b), (c) together.
 
 Why bother with two levels? It's a precision vs. context trade-off. Small chunks are better for retrieval — when you embed a 200-char chunk that says "30 days written notice," it'll rank high for a query about notice periods. A 2000-char chunk containing that same sentence plus four other clauses would rank lower because the embedding gets diluted by irrelevant text. But small chunks are bad for answering — if you only show the LLM that 200-char snippet, it's missing the surrounding context: what conditions apply, what definitions are referenced, what exceptions exist.
 
 The parent–child split lets you have both. Search against the small children for precise matches, then at answer time swap in the full parent section so the LLM gets the complete picture. That swap happens in `_enrich` in `pipeline.py`.
 
-Children overlap by 100 chars so sentences near a split boundary still show up in both chunks. Min chunk size is 20 chars — I set it that low on purpose because some of the most important clauses are very short ("99.5% monthly uptime") and dropping them would hurt retrieval.
+Children overlap by 100 chars so sentences near a split boundary still show up in both chunks. Min chunk size is 20 chars — set that low on purpose because some of the most important clauses are very short ("99.5% monthly uptime") and dropping them would hurt retrieval.
 
 ### Hybrid retrieval
 
 Pure vector search misses exact terms. Ask about "Section 4.2" or "72 hours" and the embedding might not surface the right chunk because those are specific tokens, not semantic concepts. Pure keyword search (BM25) has the opposite problem — it can't match "breach notification timeline" to a clause that says "notify within 72 hours of discovery."
 
-So I run both and combine their scores: 70% vector, 30% BM25 (configurable via `LEGAL_QA_HYBRID_ALPHA`). Both score sets are min-max normalized before fusion.
+So we run both and combine their scores: 70% vector, 30% BM25 (configurable via `LEGAL_QA_HYBRID_ALPHA`). Both score sets are min-max normalized before fusion.
 
 ### Cross-encoder re-ranking
 
-The hybrid search (vector + BM25) gives us ~20 candidate chunks. They're roughly relevant, but the ranking is noisy — a chunk that mentions the right keywords might outrank one that actually answers the question. Since I only keep the top 10, a relevant chunk sitting at position 15 because the bi-encoder scored it poorly gets cut entirely and never reaches the LLM. Re-ranking is a second pass that re-orders those 20 candidates by actual relevance to the query, so the 10 that survive the cutoff are the right ones.
+The hybrid search gives us ~20 candidate chunks. Since we only keep the top 10, ranking quality matters — a relevant chunk at position 15 gets cut and never reaches the LLM.
 
-To understand why, it helps to know how the initial retrieval works. In vector search, the query and every chunk are each independently converted into a vector (a list of numbers), and you compare them by distance. This is called a **bi-encoder** — two separate encoding steps that never see each other. It's fast because you can pre-compute all the chunk vectors once at index time, but it's lossy. Each text gets compressed into a single point in space, so fine-grained relationships between words in the query and words in the chunk get lost.
+Vector search uses a bi-encoder: query and chunk are embedded independently and compared by distance. It's fast (chunk vectors are pre-computed at index time) but approximate, because each text gets compressed into a single vector and word-level interactions between query and chunk are lost. A cross-encoder is more accurate — it takes the query and chunk as a single combined input, so the model sees both sides at once and can directly match phrases like "notice period" against "30 days written notice." The cost is that it needs a full forward pass per (query, chunk) pair, which is too slow for the whole corpus but fine for 20 pre-filtered candidates.
 
-A **cross-encoder** works differently. Instead of encoding the query and chunk separately, it feeds them both into the model together as a single input: `[query] + [chunk]`. The model sees every word from both sides at once, so it can do things like notice that "notice period" in the query lines up with "30 days written notice" in the chunk, even if those phrases would land in different parts of embedding space when encoded independently. The output is a single relevance score rather than two separate vectors.
-
-The trade-off is speed. A bi-encoder encodes each chunk once during indexing — at query time you only encode the query and do fast vector math. A cross-encoder has to do a full model forward pass for every (query, chunk) pair. With 200+ chunks that's 200+ inference calls per query, which is way too slow. But running it on just 20 pre-filtered candidates is cheap and gives much better final ranking.
-
-I use `ms-marco-MiniLM-L-6-v2` — it's a small (22M parameter) model trained specifically for passage re-ranking on the MS MARCO dataset, which is a large collection of real search queries and web passages. It's the standard choice for this kind of setup because it's fast enough to run on CPU in real-time and still gives a meaningful quality bump over bi-encoder scores alone. Larger re-rankers exist but don't justify the latency here.
+We use `ms-marco-MiniLM-L-6-v2` — a small 22M-parameter model trained for passage re-ranking on MS MARCO (a large dataset of real search queries). It's fast enough for CPU and is the standard choice for this pattern.
 
 ### HyDE (Hypothetical Document Embeddings)
 
@@ -237,7 +233,7 @@ Inconsistencies:
 
 ## Evaluation
 
-I evaluate with two complementary approaches: fast deterministic metrics (no LLM calls) and Ragas LLM-as-judge metrics.
+We evaluate with two complementary approaches: fast deterministic metrics (no LLM calls) and Ragas LLM-as-judge metrics.
 
 ### Custom metrics
 
@@ -291,7 +287,7 @@ Results go to `eval/results/` — JSON with raw outputs, a summary file, and a C
 
 ### Evaluation caveats
 
-The query set is small (17 queries) and the ground truths are hand-crafted by me, not reviewed by legal experts. Multi-turn quality isn't measured — each eval query runs independently. Take the numbers as directional, not definitive.
+The query set is small (17 queries) and the ground truths are hand-crafted, not reviewed by legal experts. Multi-turn quality isn't measured — each eval query runs independently. Take the numbers as directional, not definitive.
 
 ## Limitations
 
@@ -305,7 +301,7 @@ The query set is small (17 queries) and the ground truths are hand-crafted by me
 
 ## Production Roadmap
 
-What I'd build first if this were going to production:
+What we'd build first if this were going to production:
 
 **Immediate:** PDF/DOCX support with layout-aware parsing — real legal corpora are never plain text. Incremental indexing so adding a document doesn't require a full rebuild. Confidence scoring so users know when to trust vs. verify. Prompt injection detection before the routing agent.
 
