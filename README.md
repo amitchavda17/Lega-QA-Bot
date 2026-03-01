@@ -1,101 +1,61 @@
 # Legal Contract Q&A — Multi-Agent RAG System
 
-A console-based multi-agent RAG system for querying and analyzing legal contracts. Users ask natural language questions and receive grounded, cited answers with risk indicators and cross-document conflict detection.
+A console-based RAG system that lets you ask natural-language questions about legal contracts and get grounded, cited answers. It flags legal risks, catches contradictions across agreements, and refuses to answer things it shouldn't.
 
----
+Built with llama3.1 and nomic-embed-text running locally via Ollama — nothing leaves your machine.
 
 ## Table of Contents
 
-1. [Problem Overview](#1-problem-overview)
-2. [Architecture](#2-architecture)
-3. [Design Choices and Trade-offs](#3-design-choices-and-trade-offs)
-4. [Setup Instructions](#4-setup-instructions)
-5. [How to Run](#5-how-to-run)
-6. [Evaluation](#6-evaluation)
-7. [Known Limitations](#7-known-limitations)
-8. [Production Roadmap](#8-production-roadmap)
+- [Problem](#problem)
+- [Architecture](#architecture)
+- [Design Choices](#design-choices)
+- [Setup](#setup)
+- [Usage](#usage)
+- [Evaluation](#evaluation)
+- [Limitations](#limitations)
+- [Production Roadmap](#production-roadmap)
 
----
+## Problem
 
-## 1. Problem Overview
+Legal professionals need to pull specific facts out of contracts — notice periods, liability caps, governing law, breach timelines — without reading every page. This system takes a small corpus (4 contracts: NDA, vendor agreement, SLA, DPA) and answers questions about them.
 
-Legal professionals need to extract specific information from contracts — notice periods, liability caps, governing law, breach notification timelines — without reading every page. This system takes a small corpus of legal documents (NDAs, vendor agreements, SLAs, DPAs) and lets users ask questions in plain English.
+It needs to cite its sources, flag financial/legal risks, detect contradictions across documents (e.g., two contracts specifying different governing laws), carry context across conversation turns, and refuse out-of-scope requests like drafting or legal strategy.
 
-The system must:
+## Architecture
 
-- Return answers **grounded only in the provided documents**, with inline citations
-- Surface **legal and financial risks** (liability exposure, indemnification gaps, strict deadlines)
-- Detect **contradictions** across agreements (e.g., conflicting governing laws)
-- Support **multi-turn conversation** with context carry-over
-- Correctly **refuse** out-of-scope requests (drafting, legal strategy)
-
-The corpus contains four contracts:
-
-| Document | Key Topics |
-|----------|-----------|
-| NDA (Acme Corp ↔ Vendor XYZ) | Confidentiality, termination, notice periods |
-| Vendor Services Agreement | Liability, indemnification, governing law |
-| Service Level Agreement (SLA) | Uptime commitments, remedies, service credits |
-| Data Processing Agreement (DPA) | Data breach notification, subprocessors, compliance |
-
----
-
-## 2. Architecture
-
-### Pipeline Flow
-
-Every user query follows this path:
+Every query goes through this pipeline:
 
 ```
 User Query + Conversation History
           |
           v
-+----------------------------+
-| 1. Routing Agent           |
-|    intent, doc_scope,      |
-|    refined_query, HyDE     |
-+----------------------------+
+  1. Routing Agent
+     classifies intent, picks target docs,
+     generates BM25 query + HyDE hypothesis
           |
           v
-+----------------------------+
-| 2. Hybrid Retrieval        |
-|    Vector (Chroma) + BM25  |
-|    Cross-encoder re-rank   |
-+----------------------------+
+  2. Hybrid Retrieval
+     vector (Chroma) + BM25 keyword search
+     → cross-encoder re-ranking
           |
           v
-+----------------------------+
-| 3. Answer Agent            |
-|    Cited, grounded answer  |
-+----------------------------+
+  3. Answer Agent
+     grounded answer with [doc §section] citations
           |
           v
-+----------------------------+
-| 4. Grounding Verifier      |-----> if unsupported claims:
-|    (CRAG self-correction)  |       retry retrieval (1x)
-+----------------------------+
+  4. Grounding Verifier (CRAG)
+     checks each claim against source text
+     → if unsupported claims found, retry retrieval once
           |
           v
-+----------------------------+
-| 5. Risk + Consistency      |  (only for risk/cross-doc/summary intents)
-|    Agents                  |
-+----------------------------+
+  5. Risk + Consistency Agents
+     (only for risk/cross-doc/summary queries)
           |
           v
-  Answer | Citations | Risks | Contradictions
+  Final output: answer, citations, risks, contradictions
 ```
 
-### Agents
-
-| Agent | Responsibility | Output |
-|-------|---------------|--------|
-| **Routing** | Classifies intent (fact, risk, cross_document, summary, greeting, out_of_scope), selects target document(s), generates a BM25-optimized query and a HyDE hypothesis | JSON: intent, doc_scope, refined_query, hyde_query |
-| **Answer** | Produces a grounded answer using only retrieved excerpts, with mandatory inline citations `[doc_id §section]` | Plain text with citations |
-| **Grounding Verifier** | Breaks the answer into claims and checks each against the excerpts. If unsupported claims exist, suggests a refined retrieval query | JSON: all_supported, unsupported_claims, suggested_query |
-| **Risk** | Identifies material legal/financial risks to Acme Corp from the excerpts | JSON: list of {label, reference} |
-| **Consistency** | Compares clauses across documents and flags true conflicts (mutually incompatible obligations) | JSON: list of {doc_a, doc_b, claim_a, claim_b, topic} |
-
-Risk and consistency agents only run when the intent is `risk`, `cross_document`, or `summary` — this prevents spurious risk flagging on simple factual questions.
+The routing agent classifies intent into one of: `fact`, `risk`, `cross_document`, `summary`, `greeting`, or `out_of_scope`. Risk and consistency agents only run on the intents that need them — this prevents the system from tacking on generic risk warnings to simple factual questions.
 
 ### Project Structure
 
@@ -137,119 +97,78 @@ Legal-QA-Bot/
 └── data/                   # contract .txt files
 ```
 
----
+## Design Choices
 
-## 3. Design Choices and Trade-offs
+### Chunking: parent–child splits
 
-### Chunking: Section-Aware Hierarchical
+Legal contracts have natural structure — numbered sections, sub-clauses, enumerated lists. Fixed-size chunking ignores all of that and cuts wherever the character count runs out, often mid-sentence or mid-clause.
 
-Legal contracts are structured documents — clauses, sub-clauses, numbered lists. Naive fixed-size chunking splits these semantic units arbitrarily.
+Instead, I parse section boundaries using regex (`1. Title`, `Section N`, `Article N`) and treat each section as a parent chunk. Those parents get split into child chunks (≤400 chars) with sentence-aware and list-aware boundaries — so a list of obligations like (a), (b), (c) stays together, and no sentence gets cut in half.
 
-**Approach:**
-- Parse document structure using regex patterns for numbered sections (`1. Title`), `Section N`, `Article N`, and ALL-CAPS headings
-- Each section becomes a **parent chunk** (full context for the LLM)
-- Parent sections are split into **child chunks** (≤400 chars) for precise vector retrieval
-- Sentence-aware splitting ensures no sentence is cut mid-way
-- List-aware splitting keeps enumerated items (a), (b), (c) together
-- Overlap of 100 chars between consecutive children preserves cross-boundary context
-- Minimum chunk size of 20 chars (set deliberately low to avoid dropping short but critical clauses like "99.5% monthly uptime")
+The key idea: **retrieve on children, answer with parents**. Small chunks embed precisely — a 200-char chunk about "30 days written notice" ranks much closer to a notice-period query than a 2000-char blob would. But if you only feed that small chunk to the LLM, it misses the surrounding context (definitions, exceptions, conditions). So at retrieval time the pipeline fetches child chunks, then swaps in the full parent section text before passing context to the LLM (see `_enrich` in `pipeline.py`).
 
-**Why this matters:** A query about "uptime commitment" should retrieve the specific SLA clause, not a 2000-char blob. Child chunks enable precise retrieval; parent text gives the LLM the full section for accurate answering.
+Overlap is 100 chars between children. Min chunk size is 20 chars — deliberately low because short clauses like "99.5% monthly uptime" are often the most important ones to keep.
 
-### Embedding: nomic-embed-text (Ollama)
+### Hybrid retrieval
 
-- Runs locally, no API keys needed
-- Good performance on legal/technical text
-- Consistent with the fully-offline design goal
+Pure vector search misses exact terms. Ask about "Section 4.2" or "72 hours" and the embedding might not surface the right chunk because those are specific tokens, not semantic concepts. Pure keyword search (BM25) has the opposite problem — it can't match "breach notification timeline" to a clause that says "notify within 72 hours of discovery."
 
-### LLM: llama3.1 (Ollama)
+So I run both and combine their scores: 70% vector, 30% BM25 (configurable via `LEGAL_QA_HYBRID_ALPHA`). Both score sets are min-max normalized before fusion.
 
-- All agents use the same model through a single `OllamaChat` client
-- Temperature 0, seed 42, top_p 1.0, repeat_penalty 1.05 for deterministic output
-- All prompts enforce strict JSON output where structured responses are needed
-- Graceful error handling — if Ollama is unavailable, the system returns an error message instead of crashing
+### Cross-encoder re-ranking
 
-### Retrieval: Hybrid Search + Cross-Encoder Re-ranking
+The bi-encoder embeddings used in vector search are fast (the whole corpus is pre-embedded) but approximate — each text gets compressed into a single vector, and you compare with cosine distance. A cross-encoder is much more accurate because it processes the query and chunk together in a single forward pass, with full attention between them. But it's too slow to run on every chunk.
 
-Three-stage retrieval:
-
-1. **Vector search** (ChromaDB, nomic-embed-text embeddings) — finds semantically similar chunks
-2. **BM25 keyword search** (rank_bm25) — finds exact term matches (critical for "Section 4.2" or "72 hours")
-3. **Score fusion** — normalized scores combined: 70% vector + 30% BM25 (configurable)
-4. **Cross-encoder re-ranking** (ms-marco-MiniLM-L-6-v2) — re-scores top 20 candidates, returns top 10
-
-**Why hybrid:** Pure vector search misses exact terms. Pure keyword search misses semantic similarity ("termination notice" ≈ "cancellation period"). The combination covers both.
-
-**Why cross-encoder:** Bi-encoder embeddings are fast but approximate. The cross-encoder processes (query, chunk) pairs jointly for significantly better relevance scoring, at the cost of only running on pre-filtered candidates.
+The compromise: use bi-encoder + BM25 to get 20 candidates, then re-rank those 20 with a cross-encoder (`ms-marco-MiniLM-L-6-v2`). Top 10 go to the LLM. You get cross-encoder quality without cross-encoder cost.
 
 ### HyDE (Hypothetical Document Embeddings)
 
-The routing agent generates a `hyde_query` — a 1-2 sentence description of what an ideal contract clause answering the question would say. This hypothetical text is used as the vector search query instead of the raw question.
+Questions and documents live in different parts of the embedding space. "What is the notice period?" doesn't embed anywhere near "Either party may terminate this Agreement by providing 30 days' written notice" — they use different words and different sentence structure, even though they're about the same thing.
 
-**Why:** Questions and answers live in different embedding spaces. "What is the notice period?" is far from "Either party may terminate this Agreement by providing 30 days written notice." HyDE bridges this gap.
+HyDE bridges this gap. The routing agent generates a hypothetical answer — what the ideal contract clause might say — and uses that as the vector search query instead of the raw question. The hypothesis uses contract-like language, so it lands closer to the actual clause in embedding space.
 
-### Self-Correction (CRAG)
+This happens inside the routing step alongside intent classification and BM25 query generation, all in a single LLM call, so it doesn't add a round trip.
 
-After the answer agent generates a response, the grounding verifier checks every claim against the retrieved excerpts. If unsupported claims are found, it suggests a refined query and the pipeline retries retrieval + answering once.
+### CRAG (self-correction)
 
-**Why max 1 retry:** Diminishing returns — if the right information isn't found in two attempts, more retries won't help and will slow the system down.
+After the answer agent responds, the grounding verifier breaks the answer into claims and checks each one against the source text. If anything isn't supported, it suggests a refined retrieval query and the pipeline retries once.
 
-### Intent-Gated Risk Extraction
+One retry only. If the information isn't found in two attempts, more tries won't help — they'll just add latency (each retry = 2 LLM calls + 1 retrieval pass).
 
-Risk and consistency agents only activate for `risk`, `cross_document`, and `summary` intents. Simple factual questions ("What is the notice period?") skip risk analysis entirely.
+The obvious weakness: the verifier is also an LLM. If it hallucinates during verification and marks a fabricated claim as "supported," the loop fails silently.
 
-**Why:** Without this gating, the risk agent would flag generic risks on every query, producing noisy output. This design choice improved `risk_correct` from 58% to 76% in evaluation.
+### Intent gating for risk/consistency
 
-### Session Management
+Without gating, the risk agent flags generic risks on every query. Ask "what is the notice period?" and you'd get the answer plus a bunch of irrelevant warnings about liability caps. Gating risk and consistency agents to only run on `risk`, `cross_document`, and `summary` intents eliminated this noise and improved `risk_correct` from 58% to 76%.
 
-- Up to 5 conversation turns (10 messages) retained in memory
-- Response cache with 5-minute TTL for repeated queries
-- Agents receive the last 4 messages for conversational context
+### Other choices
 
-### All Prompts in One File
+- **nomic-embed-text** for embeddings — runs locally, 768-dim, 8192-token window. No API keys, no data leaving the machine.
+- **llama3.1** for all agents — temperature 0, seed 42 for deterministic output. One model keeps things simple. The trade-off is that routing doesn't need an 8B model and answering could benefit from a bigger one.
+- **All prompts in `utils/prompts.py`** — one file to review, edit, and diff. No hunting through five agent files to tune a prompt.
+- **Session history** — last 5 turns (10 messages), 5-minute response cache, last 4 messages passed to agents for conversational context.
 
-Every system prompt lives in `utils/prompts.py`. This makes prompt tuning easy — one file to review, edit, and version-control. No hunting through agent files.
+## Setup
 
----
-
-## 4. Setup Instructions
-
-### Prerequisites
-
-- Python 3.10+
-- [Ollama](https://ollama.com) installed and running
-
-### Install
+Prerequisites: Python 3.10+ and [Ollama](https://ollama.com) running locally.
 
 ```bash
 cd Legal-QA-Bot
 python -m venv .venv
-source .venv/bin/activate        # macOS / Linux
+source .venv/bin/activate
 pip install -r requirements.txt
-```
 
-Pull the required Ollama models:
-
-```bash
 ollama pull llama3.1
 ollama pull nomic-embed-text
 ```
 
-### Build the Index
-
-This is a one-time step that chunks the documents and stores embeddings in ChromaDB:
+Build the index (one-time, re-run if you change documents):
 
 ```bash
 python build_index.py
 ```
 
-Output shows chunk statistics per document and embedding progress.
-
-To rebuild after changing documents: just run `build_index.py` again — it drops and recreates the collection.
-
-### Configuration
-
-All settings are in `utils/config.py` and can be overridden via environment variables:
+All settings live in `utils/config.py` and can be overridden with environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -265,11 +184,7 @@ All settings are in `utils/config.py` and can be overridden via environment vari
 | `LEGAL_QA_CACHE_TTL_SEC` | `300` | Response cache TTL |
 | `LEGAL_QA_LOG_REQUESTS_TO_CONSOLE` | `0` | Set to `1` to enable per-request logging |
 
----
-
-## 5. How to Run
-
-### Interactive Console
+## Usage
 
 ```bash
 cd Legal-QA-Bot
@@ -277,16 +192,7 @@ source .venv/bin/activate
 python main.py
 ```
 
-The console accepts natural language questions. Type `exit` or `quit` to end.
-
-**Output per query:**
-
-- **Answer** — Grounded response with inline citations (`[doc_id §section_path]`)
-- **References** — List of cited document sections (shown only when present)
-- **Risks** — Flagged legal/financial risks with clause references (shown only for relevant queries)
-- **Inconsistencies** — Cross-document conflicts (shown only when detected)
-
-**Example session:**
+Type questions in plain English. The system returns an answer with citations, and optionally risks and contradictions depending on the query type.
 
 ```
 Legal Contract Q&A
@@ -313,7 +219,7 @@ References:
   [vendor_services_agreement §12]: Governing Law
 
 Risks:
-  ⚠ Conflicting governing laws across agreements (nda_acme_vendor §10 vs vendor_services_agreement §12)
+  ⚠ Conflicting governing laws (nda_acme_vendor §10 vs vendor_services_agreement §12)
 
 Inconsistencies:
   [Governing Law] nda_acme_vendor vs vendor_services_agreement:
@@ -321,54 +227,37 @@ Inconsistencies:
     B: State of New York
 ```
 
----
+## Evaluation
 
-## 6. Evaluation
+I evaluate with two complementary approaches: fast deterministic metrics (no LLM calls) and Ragas LLM-as-judge metrics.
 
-### Approach
+### Custom metrics
 
-The evaluation framework combines two complementary methods:
+These are cheap, reproducible, and run in a few minutes. Each one targets a specific failure mode:
 
-**Custom deterministic metrics** (no LLM calls, fast, reproducible):
+- **key_phrase_recall** — what fraction of expected key phrases appear in the answer? This catches the case where the system returns a vaguely relevant response but misses the actual facts (e.g., says "there is a notice period" but doesn't mention "30 days").
 
-| Metric | What It Measures | Why It Matters |
-|--------|-----------------|----------------|
-| `key_phrase_recall` | Fraction of expected key phrases found in the answer | Does the answer contain the essential facts? |
-| `citation_present` | Whether the answer contains at least one `[doc §section]` citation | Are claims grounded with sources? |
-| `retrieval_hit_rate` | Fraction of expected documents that appeared in retrieval results | Is the retriever finding the right documents? |
-| `risk_correct` | Whether risk presence/absence matches expectations | Does the system flag risks only when appropriate? |
-| `scope_correct` | Whether out-of-scope queries are correctly refused | Does the system avoid answering unanswerable questions? |
+- **citation_present** — does the answer contain at least one `[doc §section]` citation? A RAG system that doesn't cite its sources is just a chatbot. This is a binary check: either the answer points back to a document or it doesn't.
 
-**Ragas LLM-as-judge metrics** (uses llama3.1 as judge, slower):
+- **retrieval_hit_rate** — what fraction of the expected source documents showed up in retrieval results? If this is low, the problem is in retrieval (chunking, embeddings, search), not generation. If this is high but answers are still wrong, the problem is in the LLM's use of context. This metric tells you where to look.
 
-| Metric | What It Measures |
-|--------|-----------------|
-| `faithfulness` | Is every claim in the answer supported by the retrieved context? |
-| `answer_relevancy` | How relevant is the answer to the question? |
-| `context_precision` | Are the most relevant chunks ranked highest? |
+- **risk_correct** — for queries where risks should (or shouldn't) be flagged, did the system get it right? This catches both false positives (flagging risks on a simple factual question) and false negatives (missing obvious risks on a risk-focused query). Before intent gating, this was at 58%.
 
-### Running the Evaluation
+- **scope_correct** — did the system refuse out-of-scope queries (drafting requests, legal strategy) and *not* refuse in-scope ones? A system that answers everything is unsafe; a system that refuses everything is useless. This measures the boundary.
 
-```bash
-cd Legal-QA-Bot
-source .venv/bin/activate
+### Ragas metrics
 
-# Custom metrics only (fast, ~5 min)
-python -m eval.run_eval
+These use llama3.1 as a judge and are slower (~30 min), but they catch things the deterministic metrics can't:
 
-# Custom + Ragas (slow, ~30 min with local LLM)
-python -m eval.run_eval --ragas
-```
+- **faithfulness** — is every claim in the answer actually supported by the retrieved chunks? This is the hallucination metric. A high key_phrase_recall with low faithfulness means the system gets the right facts but also invents extras.
 
-**Outputs:**
+- **answer_relevancy** — is the answer actually about what the user asked? Retrieval might pull the right documents, but if the LLM latches onto an irrelevant part of the context, this catches it.
 
-- `eval/results/eval_results.json` — Raw pipeline outputs + per-query scores
-- `eval/results/eval_summary.json` — Aggregate metric summary
-- `eval/results/eval_report.csv` — One row per query with all scores
+- **context_precision** — are the most relevant chunks ranked at the top of the retrieval results? Even if the right document appears somewhere in the results, it matters whether it's ranked #1 or #10 — the LLM pays more attention to earlier context.
 
 ### Results
 
-Evaluated on 17 sample queries covering fact extraction, risk identification, cross-document comparison, summarization, and out-of-scope handling:
+Evaluated on 17 queries covering fact extraction, risk identification, cross-document comparison, summarization, and out-of-scope handling:
 
 | Metric | Score |
 |--------|-------|
@@ -381,71 +270,37 @@ Evaluated on 17 sample queries covering fact extraction, risk identification, cr
 | Context Precision (Ragas) | 0.78 |
 | Faithfulness (Ragas) | 0.47* |
 
-*Faithfulness scores are unreliable with local LLM judges — Ragas faithfulness requires multiple chained LLM calls that frequently time out or produce inconsistent decompositions with llama3.1. This is a known limitation of running Ragas with local models.
+*Faithfulness is unreliable here. Ragas faithfulness decomposes the answer into atomic claims, then asks the judge LLM to verify each one — that's multiple chained LLM calls per query. llama3.1 frequently times out or produces inconsistent decompositions in this setting. This is a known issue with running Ragas on local models; the metric would be meaningful with GPT-4 as judge but isn't trustworthy here.
 
-### Evaluation Limitations
+### Running it
 
-- **Small query set** — 17 queries cover the main scenarios but cannot test every edge case
-- **No human annotation** — Ground truths are hand-crafted by the developer, not validated by legal experts
-- **Ragas with local LLM** — Faithfulness and answer relevancy metrics are less reliable than with GPT-4 due to the judge model's own limitations
-- **Single-turn only** — Evaluation runs each query independently; multi-turn conversation quality is not measured
+```bash
+python -m eval.run_eval              # custom metrics only (~5 min)
+python -m eval.run_eval --ragas      # custom + Ragas (~30 min)
+```
 
----
+Results go to `eval/results/` — JSON with raw outputs, a summary file, and a CSV with per-query scores.
 
-## 7. Known Limitations
+### Evaluation caveats
 
-### Retrieval & Accuracy
+The query set is small (17 queries) and the ground truths are hand-crafted by me, not reviewed by legal experts. Multi-turn quality isn't measured — each eval query runs independently. Take the numbers as directional, not definitive.
 
-- **Chunking is regex-based** — Section parsing relies on patterns like `N. Title` and `Section N`. Contracts with non-standard formatting (e.g., tables, nested appendices, inline headers) may chunk poorly, leading to missed or malformed sections.
-- **No confidence signal** — The system returns answers without any confidence score. A user cannot tell whether the system is highly certain or guessing from loosely related chunks. The grounding verifier helps internally, but its verdict is not surfaced.
-- **Grounding verifier is itself an LLM** — CRAG relies on llama3.1 to judge its own output. If the LLM hallucinates during verification (marking a fabricated claim as "supported"), the self-correction loop fails silently.
-- **BM25 index rebuilt on every startup** — The keyword index is constructed in-memory from chunks each time `main.py` runs. With a large corpus this adds noticeable startup latency. Only the vector index (Chroma) is persisted.
+## Limitations
 
-### LLM & Prompting
+**Retrieval:** Chunking relies on regex section detection — contracts with unusual formatting (tables, nested appendices, inline headers) may chunk poorly. The BM25 index rebuilds in-memory on every startup since only the Chroma vector index is persisted.
 
-- **JSON output is fragile** — The LLM is prompted to return JSON, but llama3.1 occasionally wraps it in markdown fences or adds trailing text. The parser uses `find("{")` / `rfind("}")` extraction which handles most cases, but deeply nested or malformed JSON can still fail.
-- **Citation consistency varies** — Despite strict prompt instructions, the LLM sometimes omits citations on 1-2 sentences or uses slightly different formatting. The 80% citation rate reflects this — it's a prompt compliance issue inherent to the model size.
-- **Single model for all roles** — Using llama3.1 for routing, answering, grounding, risk, and consistency means each agent is limited by the same model's capabilities. A production system could use a smaller/faster model for routing and a stronger model for answering.
+**Grounding:** No confidence score is surfaced to the user. The grounding verifier helps internally, but users can't tell whether the system is confident or guessing. And since the verifier is the same LLM that generated the answer, it can fail silently.
 
-### System Design
+**LLM:** JSON output is fragile — llama3.1 sometimes wraps it in markdown fences or adds trailing text. The parser handles most cases with `find("{")`/`rfind("}")` extraction, but edge cases slip through. Citation consistency hovers around 80% due to prompt compliance limitations at this model size.
 
-- **Sequential agent calls** — Each query makes up to 5 LLM calls in series (routing → answering → grounding → retry → risk/consistency). With llama3.1 on CPU, total latency per query can reach 30-60 seconds. Risk and consistency agents are independent and could run in parallel.
-- **No incremental indexing** — Adding or updating a single document requires a full rebuild (`build_index.py` drops and recreates the entire Chroma collection). There is no diffing or selective re-embedding.
-- **Text files only** — The loader reads `.txt` files. PDF, DOCX, and scanned documents are not supported. Real legal corpora are predominantly PDF.
-- **Conversation context is naive** — The last 4 messages are passed as raw text to agents. There is no summarization of older turns, so context from earlier in a long conversation is lost entirely.
-- **No query guardrails** — The system does not detect prompt injection, jailbreaking, or PII in user queries. It assumes all queries are well-intentioned and contract-related.
-- **No access control** — All documents are visible to all users. In a real legal setting, different users/teams would need scoped access to specific contracts.
+**System:** Queries make up to 5 sequential LLM calls, so latency is 30-60s on CPU. Risk and consistency agents could run in parallel but don't yet. Only `.txt` files are supported — no PDF or DOCX. No prompt injection detection, no access control, no incremental indexing.
 
----
+## Production Roadmap
 
-## 8. Production Roadmap
+What I'd build first if this were going to production:
 
-If this system were deployed for real legal teams, here is what I would prioritize:
+**Immediate:** PDF/DOCX support with layout-aware parsing — real legal corpora are never plain text. Incremental indexing so adding a document doesn't require a full rebuild. Confidence scoring so users know when to trust vs. verify. Prompt injection detection before the routing agent.
 
-### P0 — Must Have
+**Next:** Parallel execution of risk + consistency agents (they're independent, easy win for latency). Streaming responses so users see tokens while analysis runs in the background. Per-request observability with input/output logging, latency, and retrieval scores. Document versioning for audit trails.
 
-| Enhancement | Why |
-|------------|-----|
-| **Document format support** (PDF with layout parsing, DOCX) | Real legal corpora are never plain text. Layout-aware parsing (e.g., unstructured.io, PyMuPDF) preserves tables, headers, and page structure that regex-based chunking currently misses. |
-| **Incremental indexing** | Detect changed/new documents, re-embed only affected chunks. Legal teams update contracts frequently — full rebuilds are not acceptable. |
-| **Confidence scoring** | Combine retrieval distance, grounding result, and citation density into a user-facing confidence indicator. Lets users know when to trust the answer vs. verify manually. |
-| **Prompt injection detection** | Add a lightweight classifier before the routing agent to flag adversarial inputs. Legal systems handle sensitive data — injection attacks could extract or fabricate clause interpretations. |
-
-### P1 — High Value
-
-| Enhancement | Why |
-|------------|-----|
-| **Parallel agent execution** | Risk and consistency agents are independent of each other — run them concurrently to cut 30-40% of latency on risk/cross-doc queries. |
-| **Streaming responses** | Stream answer tokens to the user while risk/consistency analysis runs in the background. Reduces perceived latency from 30s+ to first-token-in-3s. |
-| **Observability & tracing** | Log every agent call with input/output, token count, latency, and retrieval scores. Essential for debugging production failures and identifying prompt regressions. |
-| **Document versioning** | Track which version of a contract was used to generate each answer. Legal teams need audit trails — "this answer was based on the NDA signed 2024-01-15, not the amended version." |
-
-### P2 — Long Term
-
-| Enhancement | Why |
-|------------|-----|
-| **Domain-adapted embeddings** | Fine-tune the embedding model on legal text. General-purpose embeddings treat "material breach" and "significant violation" as loosely related; a legal-tuned model would rank them much closer. |
-| **Human-annotated evaluation set** | Replace developer-crafted ground truths with answers validated by legal professionals. Current evaluation measures system behavior, not legal correctness. |
-| **User feedback loop** | Thumbs up/down on answers → feed into retrieval tuning and prompt refinement. Closes the loop between deployment and improvement. |
-| **Multi-tenant access control** | Per-user or per-team document visibility. Different departments should only see contracts relevant to them. |
-| **Prompt version control** | Track prompt changes alongside eval metrics. When a prompt edit improves citation rate but degrades risk detection, you need the data to make the tradeoff. |
+**Eventually:** Fine-tuned legal embeddings, human-annotated eval set, user feedback loop, multi-tenant access control, and prompt version tracking tied to eval metrics.
