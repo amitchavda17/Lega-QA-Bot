@@ -101,13 +101,15 @@ Legal-QA-Bot/
 
 ### Chunking: parent–child splits
 
-Legal contracts have natural structure — numbered sections, sub-clauses, enumerated lists. Fixed-size chunking ignores all of that and cuts wherever the character count runs out, often mid-sentence or mid-clause.
+Most RAG systems chunk documents with a fixed sliding window — take 500 characters, step forward 250, repeat. That works okay for unstructured text, but contracts aren't unstructured. They have numbered sections, sub-clauses, enumerated obligations. A sliding window doesn't care about any of that — it'll happily cut a clause in half or lump two unrelated sections into one chunk.
 
-Instead, I parse section boundaries using regex (`1. Title`, `Section N`, `Article N`) and treat each section as a parent chunk. Those parents get split into child chunks (≤400 chars) with sentence-aware and list-aware boundaries — so a list of obligations like (a), (b), (c) stays together, and no sentence gets cut in half.
+So instead of a sliding window, I detect section boundaries with regex (`1. Title`, `Section N`, `Article N`) and split along those. Each section becomes a "parent" — the full text of that clause. Then each parent gets broken into smaller "children" (≤400 chars) that respect sentence boundaries and keep enumerated lists like (a), (b), (c) together.
 
-The key idea: **retrieve on children, answer with parents**. Small chunks embed precisely — a 200-char chunk about "30 days written notice" ranks much closer to a notice-period query than a 2000-char blob would. But if you only feed that small chunk to the LLM, it misses the surrounding context (definitions, exceptions, conditions). So at retrieval time the pipeline fetches child chunks, then swaps in the full parent section text before passing context to the LLM (see `_enrich` in `pipeline.py`).
+Why bother with two levels? It's a precision vs. context trade-off. Small chunks are better for retrieval — when you embed a 200-char chunk that says "30 days written notice," it'll rank high for a query about notice periods. A 2000-char chunk containing that same sentence plus four other clauses would rank lower because the embedding gets diluted by irrelevant text. But small chunks are bad for answering — if you only show the LLM that 200-char snippet, it's missing the surrounding context: what conditions apply, what definitions are referenced, what exceptions exist.
 
-Overlap is 100 chars between children. Min chunk size is 20 chars — deliberately low because short clauses like "99.5% monthly uptime" are often the most important ones to keep.
+The parent–child split lets you have both. Search against the small children for precise matches, then at answer time swap in the full parent section so the LLM gets the complete picture. That swap happens in `_enrich` in `pipeline.py`.
+
+Children overlap by 100 chars so sentences near a split boundary still show up in both chunks. Min chunk size is 20 chars — I set it that low on purpose because some of the most important clauses are very short ("99.5% monthly uptime") and dropping them would hurt retrieval.
 
 ### Hybrid retrieval
 
