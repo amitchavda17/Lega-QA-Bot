@@ -100,7 +100,7 @@ Risk and consistency agents only run when the intent is `risk`, `cross_document`
 ### Project Structure
 
 ```
-legal_qa/
+Legal-QA-Bot/
 ├── main.py                 # entrypoint
 ├── build_index.py          # offline index builder
 ├── pipeline.py             # orchestration (plan → retrieve → answer → verify → risks)
@@ -222,7 +222,7 @@ Every system prompt lives in `utils/prompts.py`. This makes prompt tuning easy �
 ### Install
 
 ```bash
-cd legal_qa
+cd Legal-QA-Bot
 python -m venv .venv
 source .venv/bin/activate        # macOS / Linux
 pip install -r requirements.txt
@@ -272,7 +272,7 @@ All settings are in `utils/config.py` and can be overridden via environment vari
 ### Interactive Console
 
 ```bash
-cd legal_qa
+cd Legal-QA-Bot
 source .venv/bin/activate
 python main.py
 ```
@@ -350,7 +350,7 @@ The evaluation framework combines two complementary methods:
 ### Running the Evaluation
 
 ```bash
-cd legal_qa
+cd Legal-QA-Bot
 source .venv/bin/activate
 
 # Custom metrics only (fast, ~5 min)

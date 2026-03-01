@@ -1,7 +1,7 @@
 """
 Evaluation runner.
 
-Usage (from legal_qa/):
+Usage (from Legal-QA-Bot/):
   python -m eval.run_eval              # custom metrics only (fast)
   python -m eval.run_eval --ragas      # custom + Ragas (slow, needs LLM)
 
